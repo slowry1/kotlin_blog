@@ -1,0 +1,11 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:26257/roach_data?ssl=true&sslmode=disable
+    username: maxroach
+  jpa:
+    generate-ddl: true
+#    hibernate:
+#      This will update the db. play around with this.
+#      ddl-auto: update
+server:
+  port: 8081
