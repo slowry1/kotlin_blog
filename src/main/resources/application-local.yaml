@@ -4,8 +4,7 @@ spring:
     username: maxroach
   jpa:
     generate-ddl: true
-#    hibernate:
-#      This will update the db. play around with this.
-#      ddl-auto: update
+    hibernate:
+      ddl-auto:  create
 server:
   port: 8081
