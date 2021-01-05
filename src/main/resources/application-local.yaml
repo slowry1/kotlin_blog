@@ -5,6 +5,14 @@ spring:
   jpa:
     generate-ddl: true
     hibernate:
+#      ddl-auto: update
       ddl-auto:  create
 server:
   port: 8081
+#springdoc:
+#  api-docs:
+#    path: /blog-docs
+#  swagger-ui:
+#    path: /swagger-ui.html
+#    enabled: true
+#    operations-sorter: method

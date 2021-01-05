@@ -2,10 +2,11 @@ package com.scott.blog.service
 
 import org.springframework.stereotype.Component
 import java.sql.Timestamp
+import java.time.LocalDateTime
 
 @Component
 class PostService {
-    fun rewindTimeByHours(hours: Long) : Timestamp {
-        return Timestamp(System.currentTimeMillis() - (hours*60*60*1000))
+    fun rewindTimeByHours(hours: Long) : LocalDateTime {
+        return LocalDateTime.now().minusHours(hours)
     }
 }

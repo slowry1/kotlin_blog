@@ -2,6 +2,7 @@ package com.scott.blog
 
 import com.scott.blog.model.User
 import com.scott.blog.repository.UserRepository
+import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
@@ -19,21 +20,28 @@ class UserRepositoryTest {
 
     @BeforeAll
     internal fun setUp() {
-        val jackEntity = User(-1,"jack","jack@gmail.com")
+        val jackEntity = User("jack","jack@gmail.com")
         userRepository.save(jackEntity)
         println(">> Jack Saved")
-        val jillEntity = User(-1,"jill","jill@gmail.com")
+        val jillEntity = User("jill","jill@gmail.com")
         userRepository.save(jillEntity)
         println(">> Jill Saved")
-        val bobEntity = User(-1, "bob","bob@gmail.com")
+        val bobEntity = User("bob","bob@gmail.com")
         userRepository.save(bobEntity)
         println(">> bob Saved")
+    }
 
+    @AfterAll
+    internal fun tearDown(){
+        userRepository.deleteAll()
     }
 
     @Test
     fun `test UserRepository findByName Optional` () {
-        assertEquals("jack", userRepository.findByName("jack").get().name)
+        var jack = userRepository.findByName("jack")
+        var jackOp = jack.get()
+        var jackName = jackOp.name
+        assertEquals("jack", jackName)//userRepository.findByName("jack").get().name)
     }
 
     @Test
@@ -43,16 +51,9 @@ class UserRepositoryTest {
 
     @Test
     fun `test add user`(){
-        val bobEntity = User(-1, "bob","bob@gmail.com")
+        val bobEntity = User("bob","bob@gmail.com")
         assertEquals(User::class, userRepository.save(bobEntity)::class)
     }
-
-//    @Test
-//    // TODO This may be an issue because i am just initializing the user instead of having variable i can modify
-//    fun `test update user`(){
-//        val bob = userRepository.findByName("bob")
-//
-//    }
 
     @Test
     fun `test delete user`(){
