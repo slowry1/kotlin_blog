@@ -1,13 +1,24 @@
 package com.scott.blog
 
-import org.junit.jupiter.api.Assertions
-import org.junit.jupiter.api.Test
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.scott.blog.model.*
+import com.scott.blog.repository.CredentialRepository
+import com.scott.blog.repository.PostRepository
+import com.scott.blog.repository.PublicationRepository
+import com.scott.blog.repository.UserRepository
+import com.scott.blog.service.UserService
+import org.json.JSONObject
+import org.junit.jupiter.api.*
 import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.http.ResponseEntity
 import org.springframework.boot.web.server.LocalServerPort
 import java.net.URI
-import org.junit.jupiter.api.TestInstance
+import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.web.client.TestRestTemplate
+import org.springframework.boot.test.web.client.getForEntity
+import org.springframework.http.*
+import kotlin.reflect.jvm.internal.impl.load.kotlin.JvmType
+
 
 
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -17,35 +28,76 @@ class SecurityTest {
     @LocalServerPort
     var randomServerPort = 0
 
-    val testRestTemplate = TestRestTemplate()
+    @Autowired
+    lateinit var userRepository: UserRepository
+
+    @Autowired
+    lateinit var postRepository: PostRepository
+
+    @Autowired
+    lateinit var credentialRepository: CredentialRepository
+
+    @Autowired
+    lateinit var publicationRepository: PublicationRepository
 
     val endpoints = listOf<String>("/user", "/credential", "/post", "/publication")
+    val testUserRoleEditor = "testUserRoleEditor"
+    val testUserDefaultPw = "pw"
+    val testRestTemplate = TestRestTemplate()
+    var jackUser : User = User()
+    var jillUser : User = User()
+    val testFakeUser : String = "fake_user"
+    lateinit var jackBlogPost : Blog
+    lateinit var jillBlogPost : Blog
+    lateinit var facebookUserJack : Credentials
+    lateinit var publicationBlogFB : Publication
 
-// NOT NEEDED ANYMORE
-//    lateinit var restTemplate: RestTemplate
-//
-//    @BeforeAll
-//    internal fun setUp() {
-//        restTemplate = RestTemplate(getClientHttpRequestFactory()!!)
-//    }
-//
-//    private fun getClientHttpRequestFactory(username: String, pw: String): HttpComponentsClientHttpRequestFactory? {
-//        val clientHttpRequestFactory = HttpComponentsClientHttpRequestFactory()
-//        clientHttpRequestFactory.httpClient = httpClient(username, pw)
-//        return clientHttpRequestFactory
-//    }
-//
-//    private fun httpClient(username: String, pw: String): HttpClient {
-//        val credentialsProvider: CredentialsProvider = BasicCredentialsProvider()
-//        credentialsProvider.setCredentials(
-//            AuthScope.ANY,
-//            UsernamePasswordCredentials(username, pw)
-//        )
-//        return HttpClientBuilder
-//            .create()
-//            .setDefaultCredentialsProvider(credentialsProvider)
-//            .build()
-//    }
+
+    fun userService() : UserService {
+        return UserService(userRepository, credentialRepository)
+    }
+
+    @BeforeAll
+    internal fun setUp() {
+        // Adding Users
+        val jackEntity = User(TEST_DEFAULT_USERNAME_JACK, TEST_DEFAULT_USERNAME_JACK.plus("@gmail.com"))
+        jackUser = userRepository.save(jackEntity)
+        println(">> $TEST_DEFAULT_USERNAME_JACK Saved")
+        val jillEntity = User(TEST_DEFAULT_USERNAME_JILL, TEST_DEFAULT_USERNAME_JILL.plus("@gmail.com"))
+        jillUser = userRepository.save(jillEntity)
+        println(">> $TEST_DEFAULT_USERNAME_JILL Saved")
+
+        // Adding Posts
+        jackBlogPost = Blog("I brushed my teeth today!", jackUser)
+        postRepository.save(jackBlogPost)
+        println(">> $TEST_DEFAULT_USERNAME_JACK Blog Post Saved")
+        jillBlogPost = Blog("I put on deodorant!", jillUser)
+        postRepository.save(jillBlogPost)
+        println(">> $TEST_DEFAULT_USERNAME_JILL Blog Post Saved")
+
+
+        // Adding Credentials
+        facebookUserJack = userService().addCredentialInfo(
+            TEST_DEFAULT_USERNAME_JACK, "jackUsernameFB",
+            "jackPasswordFB", PublicationTypeCreds.FACEBOOK)
+
+
+        credentialRepository.save(facebookUserJack)
+        println(">> $TEST_DEFAULT_USERNAME_JACK Facebook Credential Saved")
+
+        // Post Publications
+        publicationBlogFB = Publication(jackBlogPost, PublicationType.FACEBOOK)
+        publicationRepository.save(publicationBlogFB)
+        println(">> $TEST_DEFAULT_USERNAME_JACK Blog Facebook Publication Posted")
+    }
+
+    @AfterAll
+    internal fun tearDown(){
+        publicationRepository.deleteAll()
+        credentialRepository.deleteAll()
+        postRepository.deleteAll()
+        userRepository.deleteAll()
+    }
 
     @Test
     fun testUnauthorizedEndpoints() {
@@ -79,40 +131,212 @@ class SecurityTest {
             if (responseBodyWithoutWhiteSpace != null) {
                 Assertions.assertTrue(responseBodyWithoutWhiteSpace.contains("\"_links\":{\"self\":{\"href\":\"$uri\""))
             }
-
         }
     }
 
-//    @Test
-//    fun testUnauthorizedEnpoints() {
-//        val restTemplate = RestTemplate()//getClientHttpRequestFactory("scott", "pw")!!)
-//        val baseUrl = "http://localhost:" + randomServerPort.toString() + "/user"
-//        val uri = URI(baseUrl)
-////        val result: ResponseEntity<String> = restTemplate.getForEntity(uri, String::class.java)
-//        restTemplate.errorHandler.handleError(uri, )
-////        restTemplate.getForEntity(uri, String::class.java)
-////        Assertions.assertEquals(401, restTemplate.getForEntity(uri, String::class.java).statusCodeValue)
-//        //Verify request succeed
-//       // Assertions.assertEquals(200, result.statusCodeValue)
-////        Assertions.assertEquals(401, result.statusCodeValue)
-////        Assertions.assertEquals(true, result.body!!.contains("employeeList"))
-//    }
-//
-//    @Test
-//    fun testAuthorizedEnpoints() {
-//        val restTemplate = RestTemplate(getClientHttpRequestFactory("scott", "pw")!!)
-//        val baseUrl = "http://localhost:" + randomServerPort.toString() + "/user"
-//        val uri = URI(baseUrl)
-//        val result: ResponseEntity<String> = restTemplate.getForEntity(uri, String::class.java)
-//
-//        //Verify request succeed
-//        Assertions.assertEquals(200, result.statusCodeValue)
-////        Assertions.assertEquals(401, result.statusCodeValue)
-////        Assertions.assertEquals(true, result.body!!.contains("employeeList"))
-//    }
+    @Test
+    fun `test post endpoints - POST unauthenticated`() {
+        val baseUrl = "http://localhost:$randomServerPort"
+        var basePostUri = URI("$baseUrl/post")
 
+        val jsonObject = JSONObject()
+        jsonObject.put("author", "$baseUrl/user/${jackUser.id}")
+        jsonObject.put("type", "blank")
+        var headers = HttpHeaders()
+        headers.contentType = MediaType.APPLICATION_JSON
+        val postRequest = HttpEntity(jsonObject.toString(), headers)
 
+        // Post Post Test
+        val response : ResponseEntity<String> = testRestTemplate
+            .withBasicAuth(testFakeUser, testUserDefaultPw)
+            .postForEntity<String>(basePostUri, postRequest, String::class.java)// .getForEntity<String>(basePostUri, String::class.java)
 
+        Assertions.assertEquals(401, response.statusCodeValue)
+    }
 
+    @Test
+    fun `test post endpoints - GET unauthenticated`() {
+        val baseUrl = "http://localhost:$randomServerPort"
+        var basePostUri = URI("$baseUrl/post")
+        val response : ResponseEntity<String> = testRestTemplate
+            .withBasicAuth(testFakeUser, testUserDefaultPw)
+            .getForEntity<String>(basePostUri, String::class.java)
+        Assertions.assertEquals(401, response.statusCodeValue)
+    }
 
+    @Test
+    fun `test post endpoints - POST Publish unauthenticated`() {
+        val baseUrl = "http://localhost:$randomServerPort"
+        var basePublicationUri = URI("$baseUrl/publication")
+
+        val pubJsonObject = JSONObject()
+        pubJsonObject.put("publication", "$baseUrl/post/${jackBlogPost.id}")
+        pubJsonObject.put("publicationType", "LOCAL")
+
+        var headers = HttpHeaders()
+        headers.contentType = MediaType.APPLICATION_JSON
+        val postRequest = HttpEntity(pubJsonObject.toString(), headers)
+
+        // Publish Post Test
+        val testUserRoleEditorPostResponse =
+            testRestTemplate.withBasicAuth(testFakeUser, testUserDefaultPw)
+                .postForEntity(basePublicationUri, postRequest, String::class.java)
+        Assertions.assertEquals(401, testUserRoleEditorPostResponse.statusCodeValue)
+    }
+
+    @Test
+    fun `test post endpoints - DELETE unauthenticated`() {
+        val baseUrl = "http://localhost:$randomServerPort"
+        var basePostUri = URI("$baseUrl/post")
+        var deletePostUri = URI("$basePostUri/${jillBlogPost.id}")
+        var headers = HttpHeaders()
+        headers.contentType = MediaType.APPLICATION_JSON
+        val postRequest = HttpEntity<Post>(headers)
+
+        // Delete any associated publications
+        var publicationObjects = publicationRepository.findByPublication(jillBlogPost)
+        publicationObjects.forEach {
+            publicationRepository.delete(it)
+        }
+        // Delete Post Test
+        val response = testRestTemplate.withBasicAuth(testFakeUser, testUserDefaultPw)
+            .exchange(deletePostUri, HttpMethod.DELETE, postRequest, String::class.java)
+        Assertions.assertEquals(401, response.statusCodeValue)
+    }
+
+    @Test
+    fun `test post endpoints - POST authenticated access granted`() {
+        val baseUrl = "http://localhost:$randomServerPort"
+        var basePostUri = URI("$baseUrl/post")
+        val jsonObject = JSONObject()
+        jsonObject.put("author", "$baseUrl/user/${jackUser.id}")
+        jsonObject.put("type", "blank")
+        var headers = HttpHeaders()
+        headers.contentType = MediaType.APPLICATION_JSON
+        val postRequest = HttpEntity(jsonObject.toString(), headers)
+
+        // Post Post Test
+        val testUserRoleEditorPostResponse =
+            testRestTemplate.withBasicAuth(testUserRoleEditor, testUserDefaultPw)
+                .postForEntity(basePostUri, postRequest, String::class.java)
+        Assertions.assertEquals(201, testUserRoleEditorPostResponse.statusCodeValue)
+    }
+
+    @Test
+    fun `test post endpoints - POST authenticated access denied`() {
+        val baseUrl = "http://localhost:$randomServerPort"
+        var basePostUri = URI("$baseUrl/post")
+
+        val jsonObject = JSONObject()
+        jsonObject.put("author", "$baseUrl/user/${jackUser.id}")
+        jsonObject.put("type", "blank")
+        var headers = HttpHeaders()
+        headers.contentType = MediaType.APPLICATION_JSON
+        val postRequest = HttpEntity(jsonObject.toString(), headers)
+
+        // Post Post Test
+        val testUserRoleEditorPostResponse =
+            testRestTemplate.withBasicAuth(TEST_USER_ROLE_NO_ACCESS_THAT_DOES_NOT_HAVE_ACCESS_TO_ANYTHING, testUserDefaultPw)
+                .postForEntity(basePostUri, postRequest, String::class.java)
+        Assertions.assertEquals(403, testUserRoleEditorPostResponse.statusCodeValue)
+    }
+
+    @Test
+    fun `test post endpoints - GET authenticated access granted`() {
+        val baseUrl = "http://localhost:$randomServerPort"
+        var basePostUri = URI("$baseUrl/post")
+
+        // Get Post Test
+        val getResponse = testRestTemplate.withBasicAuth(testUserRoleEditor, testUserDefaultPw)
+            .getForEntity(basePostUri, String::class.java)
+        Assertions.assertEquals(200, getResponse.statusCodeValue)
+    }
+
+    @Test
+    fun `test post endpoints - GET authenticated access denied`() {
+        val baseUrl = "http://localhost:$randomServerPort"
+        var basePostUri = URI("$baseUrl/post")
+
+        // Get Post Test
+        val getResponse = testRestTemplate.withBasicAuth(TEST_USER_ROLE_NO_ACCESS_THAT_DOES_NOT_HAVE_ACCESS_TO_ANYTHING, testUserDefaultPw)
+            .getForEntity(basePostUri, String::class.java)
+        Assertions.assertEquals(403, getResponse.statusCodeValue)
+    }
+
+    @Test
+    fun `test post endpoints - POST Publish authenticated access granted`() {
+        val baseUrl = "http://localhost:$randomServerPort"
+        var basePublicationUri = URI("$baseUrl/publication")
+
+        val pubJsonObject = JSONObject()
+        pubJsonObject.put("publication", "$baseUrl/post/${jackBlogPost.id}")
+        pubJsonObject.put("publicationType", "LOCAL")
+
+        var headers = HttpHeaders()
+        headers.contentType = MediaType.APPLICATION_JSON
+        val postRequest = HttpEntity(pubJsonObject.toString(), headers)
+
+        // Publish Post Test
+        val testUserRoleEditorPostResponse =
+            testRestTemplate.withBasicAuth(testUserRoleEditor, testUserDefaultPw)
+                .postForEntity(basePublicationUri, postRequest, String::class.java)
+        Assertions.assertEquals(201, testUserRoleEditorPostResponse.statusCodeValue)
+    }
+
+    @Test
+    fun `test post endpoints - POST Publish authenticated access denied`() {
+        val baseUrl = "http://localhost:$randomServerPort"
+        var basePublicationUri = URI("$baseUrl/publication")
+
+        val pubJsonObject = JSONObject()
+        pubJsonObject.put("publication", "$baseUrl/post/${jackBlogPost.id}")
+        pubJsonObject.put("publicationType", "LOCAL")
+
+        var headers = HttpHeaders()
+        headers.contentType = MediaType.APPLICATION_JSON
+        val postRequest = HttpEntity(pubJsonObject.toString(), headers)
+
+        // Publish Post Test
+        val testUserRoleEditorPostResponse =
+            testRestTemplate.withBasicAuth(TEST_USER_ROLE_NO_ACCESS_THAT_DOES_NOT_HAVE_ACCESS_TO_ANYTHING, testUserDefaultPw)
+                .postForEntity(basePublicationUri, postRequest, String::class.java)
+        Assertions.assertEquals(403, testUserRoleEditorPostResponse.statusCodeValue)
+    }
+
+    @Test
+    fun `test post endpoints - DELETE authenticated access granted`() {
+        val baseUrl = "http://localhost:$randomServerPort"
+        var basePostUri = URI("$baseUrl/post")
+        var deletePostUri = URI("$basePostUri/${jillBlogPost.id}")
+        var headers = HttpHeaders()
+        headers.contentType = MediaType.APPLICATION_JSON
+        val postRequest = HttpEntity<Post>(headers)
+
+        // Delete any associated publications
+        var publicationObjects = publicationRepository.findByPublication(jillBlogPost)
+        publicationObjects.forEach {
+            publicationRepository.delete(it)
+        }
+        // Delete Post Test
+        testRestTemplate.withBasicAuth(testUserRoleEditor, testUserDefaultPw)
+            .exchange(deletePostUri, HttpMethod.DELETE, postRequest, String::class.java)
+        val tryToGetDeletedPost = postRepository.findAllByAuthor(jillUser)
+        Assertions.assertEquals(0, tryToGetDeletedPost.size)
+    }
+
+    @Test
+    fun `test post endpoints - DELETE authenticated access denied`() {
+        val baseUrl = "http://localhost:$randomServerPort"
+        var basePostUri = URI("$baseUrl/post")
+        var deletePostUri = URI("$basePostUri/${jillBlogPost.id}")
+        var headers = HttpHeaders()
+        headers.contentType = MediaType.APPLICATION_JSON
+        val postRequest = HttpEntity<Post>(headers)
+
+        // Delete Post Test
+        val response = testRestTemplate
+            .withBasicAuth(TEST_USER_ROLE_NO_ACCESS_THAT_DOES_NOT_HAVE_ACCESS_TO_ANYTHING, testUserDefaultPw)
+            .exchange(deletePostUri, HttpMethod.DELETE, postRequest, String::class.java)
+        Assertions.assertEquals(403, response.statusCodeValue)
+    }
 }
