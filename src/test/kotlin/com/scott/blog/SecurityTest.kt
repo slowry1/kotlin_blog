@@ -3,10 +3,7 @@ package com.scott.blog
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.scott.blog.model.*
-import com.scott.blog.repository.CredentialRepository
-import com.scott.blog.repository.PostRepository
-import com.scott.blog.repository.PublicationRepository
-import com.scott.blog.repository.UserRepository
+import com.scott.blog.repository.*
 import com.scott.blog.service.UserService
 import org.json.JSONObject
 import org.junit.jupiter.api.*
@@ -32,6 +29,9 @@ class SecurityTest {
     lateinit var userRepository: UserRepository
 
     @Autowired
+    lateinit var roleRepository: RoleRepository
+
+    @Autowired
     lateinit var postRepository: PostRepository
 
     @Autowired
@@ -41,12 +41,11 @@ class SecurityTest {
     lateinit var publicationRepository: PublicationRepository
 
     val endpoints = listOf<String>("/user", "/credential", "/post", "/publication")
-    val testUserRoleEditor = "testUserRoleEditor"
-    val testUserDefaultPw = "pw"
+    val testUserDefaultPw : String = "pw"
     val testRestTemplate = TestRestTemplate()
-    var jackUser : User = User()
-    var jillUser : User = User()
-    val testFakeUser : String = "fake_user"
+    var jackUserEditor : User = User()  // Editor
+    var jillUserAuthor : User = User()  // Author
+    var hulkUserNone : User = User()
     lateinit var jackBlogPost : Blog
     lateinit var jillBlogPost : Blog
     lateinit var facebookUserJack : Credentials
@@ -59,26 +58,36 @@ class SecurityTest {
 
     @BeforeAll
     internal fun setUp() {
+        // Adding Roles
+        val editorRole = Role(RoleType.Editor)
+        val authorRole = Role(RoleType.Author)
+        val noneRole = Role(RoleType.None)
+        roleRepository.saveAll(mutableListOf(editorRole, authorRole, noneRole))
+        println(">> 3 Roles Saved")
+
         // Adding Users
-        val jackEntity = User(TEST_DEFAULT_USERNAME_JACK, TEST_DEFAULT_USERNAME_JACK.plus("@gmail.com"))
-        jackUser = userRepository.save(jackEntity)
+        val jackEntityEditor = User(TEST_DEFAULT_USERNAME_JACK, TEST_DEFAULT_USERNAME_JACK.plus("@gmail.com"), testUserDefaultPw, listOf(editorRole))
+        jackUserEditor = userRepository.save(jackEntityEditor)
         println(">> $TEST_DEFAULT_USERNAME_JACK Saved")
-        val jillEntity = User(TEST_DEFAULT_USERNAME_JILL, TEST_DEFAULT_USERNAME_JILL.plus("@gmail.com"))
-        jillUser = userRepository.save(jillEntity)
+        val jillEntityAuthor = User(TEST_DEFAULT_USERNAME_JILL, TEST_DEFAULT_USERNAME_JILL.plus("@gmail.com"), testUserDefaultPw, listOf(authorRole))
+        jillUserAuthor = userRepository.save(jillEntityAuthor)
         println(">> $TEST_DEFAULT_USERNAME_JILL Saved")
+        val hulkEntityNone = User(TEST_DEFAULT_USERNAME_HULK, TEST_DEFAULT_USERNAME_HULK.plus("@gmail.com"), testUserDefaultPw, listOf(noneRole))
+        hulkUserNone = userRepository.save(hulkEntityNone)
+        println(">> $TEST_DEFAULT_USERNAME_HULK Saved")
 
         // Adding Posts
-        jackBlogPost = Blog("I brushed my teeth today!", jackUser)
+        jackBlogPost = Blog("I brushed my teeth today!", jackUserEditor)
         postRepository.save(jackBlogPost)
         println(">> $TEST_DEFAULT_USERNAME_JACK Blog Post Saved")
-        jillBlogPost = Blog("I put on deodorant!", jillUser)
+        jillBlogPost = Blog("I put on deodorant!", jillUserAuthor)
         postRepository.save(jillBlogPost)
         println(">> $TEST_DEFAULT_USERNAME_JILL Blog Post Saved")
 
 
         // Adding Credentials
         facebookUserJack = userService().addCredentialInfo(
-            TEST_DEFAULT_USERNAME_JACK, "jackUsernameFB",
+            TEST_DEFAULT_USERNAME_JACK, "jackUserEditornameFB",
             "jackPasswordFB", PublicationTypeCreds.FACEBOOK)
 
 
@@ -97,6 +106,7 @@ class SecurityTest {
         credentialRepository.deleteAll()
         postRepository.deleteAll()
         userRepository.deleteAll()
+        roleRepository.deleteAll()
     }
 
     @Test
@@ -123,7 +133,7 @@ class SecurityTest {
 
         for (item in endpoints) {
             uri = URI(baseUrl + item)
-            response = testRestTemplate.withBasicAuth("scott", "pw")
+            response = testRestTemplate.withBasicAuth(TEST_DEFAULT_USERNAME_JACK, testUserDefaultPw)
                 .getForEntity<String>(uri, String::class.java)
             Assertions.assertEquals(200, response.statusCodeValue)
             val responseBodyWithoutWhiteSpace = response.body?.replace("\\s".toRegex(), "")
@@ -140,7 +150,7 @@ class SecurityTest {
         var basePostUri = URI("$baseUrl/post")
 
         val jsonObject = JSONObject()
-        jsonObject.put("author", "$baseUrl/user/${jackUser.id}")
+        jsonObject.put("author", "$baseUrl/user/${jackUserEditor.id}")
         jsonObject.put("type", "blank")
         var headers = HttpHeaders()
         headers.contentType = MediaType.APPLICATION_JSON
@@ -148,7 +158,7 @@ class SecurityTest {
 
         // Post Post Test
         val response : ResponseEntity<String> = testRestTemplate
-            .withBasicAuth(testFakeUser, testUserDefaultPw)
+            .withBasicAuth("invalid_user", "invalid_pw")
             .postForEntity<String>(basePostUri, postRequest, String::class.java)// .getForEntity<String>(basePostUri, String::class.java)
 
         Assertions.assertEquals(401, response.statusCodeValue)
@@ -159,7 +169,7 @@ class SecurityTest {
         val baseUrl = "http://localhost:$randomServerPort"
         var basePostUri = URI("$baseUrl/post")
         val response : ResponseEntity<String> = testRestTemplate
-            .withBasicAuth(testFakeUser, testUserDefaultPw)
+            .withBasicAuth("invalid_user", "invalid_pw")
             .getForEntity<String>(basePostUri, String::class.java)
         Assertions.assertEquals(401, response.statusCodeValue)
     }
@@ -179,7 +189,7 @@ class SecurityTest {
 
         // Publish Post Test
         val testUserRoleEditorPostResponse =
-            testRestTemplate.withBasicAuth(testFakeUser, testUserDefaultPw)
+            testRestTemplate.withBasicAuth("invalid_user", "invalid_pw")
                 .postForEntity(basePublicationUri, postRequest, String::class.java)
         Assertions.assertEquals(401, testUserRoleEditorPostResponse.statusCodeValue)
     }
@@ -199,7 +209,7 @@ class SecurityTest {
             publicationRepository.delete(it)
         }
         // Delete Post Test
-        val response = testRestTemplate.withBasicAuth(testFakeUser, testUserDefaultPw)
+        val response = testRestTemplate.withBasicAuth("invalid_user", "invalid_pw")
             .exchange(deletePostUri, HttpMethod.DELETE, postRequest, String::class.java)
         Assertions.assertEquals(401, response.statusCodeValue)
     }
@@ -209,7 +219,7 @@ class SecurityTest {
         val baseUrl = "http://localhost:$randomServerPort"
         var basePostUri = URI("$baseUrl/post")
         val jsonObject = JSONObject()
-        jsonObject.put("author", "$baseUrl/user/${jackUser.id}")
+        jsonObject.put("author", "$baseUrl/user/${jackUserEditor.id}")
         jsonObject.put("type", "blank")
         var headers = HttpHeaders()
         headers.contentType = MediaType.APPLICATION_JSON
@@ -217,7 +227,7 @@ class SecurityTest {
 
         // Post Post Test
         val testUserRoleEditorPostResponse =
-            testRestTemplate.withBasicAuth(testUserRoleEditor, testUserDefaultPw)
+            testRestTemplate.withBasicAuth(TEST_DEFAULT_USERNAME_JACK, testUserDefaultPw)
                 .postForEntity(basePostUri, postRequest, String::class.java)
         Assertions.assertEquals(201, testUserRoleEditorPostResponse.statusCodeValue)
     }
@@ -228,7 +238,7 @@ class SecurityTest {
         var basePostUri = URI("$baseUrl/post")
 
         val jsonObject = JSONObject()
-        jsonObject.put("author", "$baseUrl/user/${jackUser.id}")
+        jsonObject.put("author", "$baseUrl/user/${jackUserEditor.id}")
         jsonObject.put("type", "blank")
         var headers = HttpHeaders()
         headers.contentType = MediaType.APPLICATION_JSON
@@ -236,7 +246,7 @@ class SecurityTest {
 
         // Post Post Test
         val testUserRoleEditorPostResponse =
-            testRestTemplate.withBasicAuth(TEST_USER_ROLE_NO_ACCESS_THAT_DOES_NOT_HAVE_ACCESS_TO_ANYTHING, testUserDefaultPw)
+            testRestTemplate.withBasicAuth(TEST_DEFAULT_USERNAME_HULK, testUserDefaultPw)
                 .postForEntity(basePostUri, postRequest, String::class.java)
         Assertions.assertEquals(403, testUserRoleEditorPostResponse.statusCodeValue)
     }
@@ -247,7 +257,7 @@ class SecurityTest {
         var basePostUri = URI("$baseUrl/post")
 
         // Get Post Test
-        val getResponse = testRestTemplate.withBasicAuth(testUserRoleEditor, testUserDefaultPw)
+        val getResponse = testRestTemplate.withBasicAuth(TEST_DEFAULT_USERNAME_JACK, testUserDefaultPw)
             .getForEntity(basePostUri, String::class.java)
         Assertions.assertEquals(200, getResponse.statusCodeValue)
     }
@@ -258,7 +268,7 @@ class SecurityTest {
         var basePostUri = URI("$baseUrl/post")
 
         // Get Post Test
-        val getResponse = testRestTemplate.withBasicAuth(TEST_USER_ROLE_NO_ACCESS_THAT_DOES_NOT_HAVE_ACCESS_TO_ANYTHING, testUserDefaultPw)
+        val getResponse = testRestTemplate.withBasicAuth(TEST_DEFAULT_USERNAME_HULK, testUserDefaultPw)
             .getForEntity(basePostUri, String::class.java)
         Assertions.assertEquals(403, getResponse.statusCodeValue)
     }
@@ -278,7 +288,7 @@ class SecurityTest {
 
         // Publish Post Test
         val testUserRoleEditorPostResponse =
-            testRestTemplate.withBasicAuth(testUserRoleEditor, testUserDefaultPw)
+            testRestTemplate.withBasicAuth(TEST_DEFAULT_USERNAME_JACK, testUserDefaultPw)
                 .postForEntity(basePublicationUri, postRequest, String::class.java)
         Assertions.assertEquals(201, testUserRoleEditorPostResponse.statusCodeValue)
     }
@@ -298,7 +308,7 @@ class SecurityTest {
 
         // Publish Post Test
         val testUserRoleEditorPostResponse =
-            testRestTemplate.withBasicAuth(TEST_USER_ROLE_NO_ACCESS_THAT_DOES_NOT_HAVE_ACCESS_TO_ANYTHING, testUserDefaultPw)
+            testRestTemplate.withBasicAuth(TEST_DEFAULT_USERNAME_HULK, testUserDefaultPw)
                 .postForEntity(basePublicationUri, postRequest, String::class.java)
         Assertions.assertEquals(403, testUserRoleEditorPostResponse.statusCodeValue)
     }
@@ -318,9 +328,9 @@ class SecurityTest {
             publicationRepository.delete(it)
         }
         // Delete Post Test
-        testRestTemplate.withBasicAuth(testUserRoleEditor, testUserDefaultPw)
+        testRestTemplate.withBasicAuth(TEST_DEFAULT_USERNAME_JACK, testUserDefaultPw)
             .exchange(deletePostUri, HttpMethod.DELETE, postRequest, String::class.java)
-        val tryToGetDeletedPost = postRepository.findAllByAuthor(jillUser)
+        val tryToGetDeletedPost = postRepository.findAllByAuthor(jillUserAuthor)
         Assertions.assertEquals(0, tryToGetDeletedPost.size)
     }
 
@@ -335,7 +345,7 @@ class SecurityTest {
 
         // Delete Post Test
         val response = testRestTemplate
-            .withBasicAuth(TEST_USER_ROLE_NO_ACCESS_THAT_DOES_NOT_HAVE_ACCESS_TO_ANYTHING, testUserDefaultPw)
+            .withBasicAuth(TEST_DEFAULT_USERNAME_HULK, testUserDefaultPw)
             .exchange(deletePostUri, HttpMethod.DELETE, postRequest, String::class.java)
         Assertions.assertEquals(403, response.statusCodeValue)
     }

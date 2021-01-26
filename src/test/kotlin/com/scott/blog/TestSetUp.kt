@@ -16,6 +16,7 @@ import org.springframework.stereotype.Service
 
 const val TEST_DEFAULT_USERNAME_JACK : String = "jack"
 const val TEST_DEFAULT_USERNAME_JILL : String = "jill"
+const val TEST_DEFAULT_USERNAME_HULK : String = "hulk"
 const val TEST_USER_ROLE_NO_ACCESS_THAT_DOES_NOT_HAVE_ACCESS_TO_ANYTHING : String = "test_user_role_no_access"
 
 
